@@ -35,6 +35,28 @@ jobs:
           git apply --check patches/telegram_camera2_stream_limits.patch
           git apply patches/telegram_camera2_stream_limits.patch
 
+      - name: Configure own Telegram API credentials
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re, sys
+          api_id = os.environ.get("TELEGRAM_API_ID", "").strip()
+          api_hash = os.environ.get("TELEGRAM_API_HASH", "").strip()
+          if not re.fullmatch(r"[0-9]+", api_id) or not re.fullmatch(r"[0-9a-fA-F]{32}", api_hash):
+              sys.exit("Set TELEGRAM_API_ID and TELEGRAM_API_HASH in GitHub Actions repository secrets.")
+          path = pathlib.Path("TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java")
+          content = path.read_text()
+          content, n1 = re.subn(r'public static int APP_ID = \d+;', f'public static int APP_ID = {api_id};', content, count=1)
+          content, n2 = re.subn(r'public static String APP_HASH = "[^"]*";', f'public static String APP_HASH = "{api_hash}";', content, count=1)
+          content, n3 = re.subn(r'public static boolean SUPPORTS_PASSKEYS = true;', 'public static boolean SUPPORTS_PASSKEYS = false;', content, count=1)
+          if (n1, n2, n3) != (1, 1, 1):
+              sys.exit("BuildVars.java layout changed; refusing to build with default app credentials.")
+          path.write_text(content)
+          print("Own Telegram API credentials configured (values not printed).")
+          PY
+
       - name: Build debug APK
         run: |
           chmod +x gradlew
