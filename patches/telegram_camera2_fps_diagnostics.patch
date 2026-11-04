@@ -1,0 +1,19 @@
+--- a/TMessagesProj/src/main/java/org/telegram/utils/recorder/round/RoundVideoCameraController.java
++++ b/TMessagesProj/src/main/java/org/telegram/utils/recorder/round/RoundVideoCameraController.java
+@@ -1730,6 +1730,16 @@
+                     int expectedFps = activeFrameRate == null
+                             ? 0
+                             : activeFrameRate.getValue();
++                    Long actualFrameDurationNs = result.get(CaptureResult.SENSOR_FRAME_DURATION);
++                    Long actualExposureTimeNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME);
++                    Range<Integer> appliedFpsRange = result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE);
++                    Integer appliedAeMode = result.get(CaptureResult.CONTROL_AE_MODE);
++                    diagnostics.log("camera HAL timing: appliedFpsRange=" + appliedFpsRange
++                            + ", frameDurationMs=" + (actualFrameDurationNs == null
++                            ? "unknown" : nanosToMs(actualFrameDurationNs))
++                            + ", exposureTimeMs=" + (actualExposureTimeNs == null
++                            ? "unknown" : nanosToMs(actualExposureTimeNs))
++                            + ", aeMode=" + appliedAeMode);
+                     diagnostics.log("camera capture rate: measuredFps=" + measuredFps
+                             + ", requestedFps=" + requestedFrameRate.getValue()
+                             + ", activeFps=" + (expectedFps == 0 ? "unknown" : expectedFps)
