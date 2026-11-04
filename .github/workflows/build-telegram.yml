@@ -1,0 +1,52 @@
+name: Build Telegram Camera2 diagnostic APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and NDK
+        run: |
+          sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.2.12479018' 'cmake;3.22.1'
+          yes | sdkmanager --licenses || true
+
+      - name: Apply Camera2 diagnostic patches
+        run: |
+          git apply --check patches/telegram_camera2_fps_diagnostics.patch
+          git apply patches/telegram_camera2_fps_diagnostics.patch
+          git apply --check patches/telegram_camera2_stream_limits.patch
+          git apply patches/telegram_camera2_stream_limits.patch
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :TMessagesProj_App:assembleAfatDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-camera2-diagnostic-apk
+          path: TMessagesProj_App/build/outputs/apk/**/*.apk
+          if-no-files-found: error
