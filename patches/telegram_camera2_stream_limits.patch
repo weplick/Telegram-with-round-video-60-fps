@@ -1,0 +1,22 @@
+--- a/TMessagesProj/src/main/java/org/telegram/utils/recorder/round/RoundVideoCameraController.java
++++ b/TMessagesProj/src/main/java/org/telegram/utils/recorder/round/RoundVideoCameraController.java
+@@ -1369,6 +1369,19 @@
+                     + ", recording=" + recordingSize
+                     + ", fpsRange=" + activeFpsRange
+                     + ", glPreview=" + glPreviewEnabled);
++            // Check whether the selected SurfaceTexture streams can physically sustain 60 FPS.
++            // A requested AE range of [60,60] cannot override a 33 ms stream minimum.
++            if (characteristics != null) {
++                long recordMinNs = getMinimumFrameDurationNs(characteristics, recordingSize);
++                long previewMinNs = glPreviewEnabled ? -1L
++                        : getMinimumFrameDurationNs(characteristics, previewSize);
++                long effectiveMinNs = Math.max(recordMinNs, previewMinNs);
++                diagnostics.log("camera stream limits: recordingMinNs=" + recordMinNs
++                        + ", previewMinNs=" + previewMinNs
++                        + ", effectiveMinNs=" + effectiveMinNs
++                        + ", maxFpsFromStreams=" + (effectiveMinNs > 0
++                        ? 1_000_000_000.0 / effectiveMinNs : "unknown"));
++            }
+             device.createCaptureSession(
+                     glPreviewEnabled
+                             ? Arrays.asList(recordingSurface)
