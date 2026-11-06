@@ -194,5 +194,4 @@ android {
     }
 }
 
-// Firebase google-services Gradle plugin disabled for Smoothygram camera diagnostics.
-// FCM notifications and other Firebase-backed services may not work.
+apply plugin: 'com.google.gms.google-services'
