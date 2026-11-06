@@ -96,10 +96,40 @@ jobs:
           chmod +x gradlew
           ./gradlew :TMessagesProj_App:assembleAfatDebug --no-daemon --stacktrace
 
+      - name: Verify APK package, signature and SHA-256
+        env:
+          TELEGRAM_SIGNING_PASSWORD: ${{ secrets.TELEGRAM_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(find TMessagesProj_App/build/outputs/apk -type f -name '*.apk')
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "Expected exactly one APK, found ${#apks[@]}"
+            exit 1
+          fi
+          apk="${apks[0]}"
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          aapt="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          "$apksigner" verify --verbose --print-certs "$apk" > apk-verification.txt
+          cat apk-verification.txt
+          package_name=$("$aapt" dump badging "$apk" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p" | head -n1)
+          echo "APK package: $package_name"
+          test "$package_name" = "org.telegram.messenger.beta"
+          expected_digest=$(keytool -exportcert -keystore TMessagesProj/config/release.keystore -alias weplick60 -storepass "$TELEGRAM_SIGNING_PASSWORD" | sha256sum | awk '{print $1}')
+          actual_digest=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' apk-verification.txt | head -n1)
+          if [ "$expected_digest" != "$actual_digest" ]; then
+            echo "APK certificate does not match our signing key!"
+            exit 1
+          fi
+          echo "Verified: personal signing certificate matches APK."
+          sha256sum "$apk" | tee apk-sha256.txt
+
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v7
         with:
           name: telegram-camera2-diagnostic-apk
-          path: TMessagesProj_App/build/outputs/apk/**/*.apk
+          path: |
+            TMessagesProj_App/build/outputs/apk/**/*.apk
+            apk-sha256.txt
+            apk-verification.txt
           if-no-files-found: error
