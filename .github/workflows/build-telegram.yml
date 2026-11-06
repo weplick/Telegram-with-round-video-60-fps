@@ -1,4 +1,4 @@
-name: Build Telegram Camera2 diagnostic APK
+name: Build Smoothygram Camera2 diagnostic APK
 
 on:
   workflow_dispatch:
@@ -90,6 +90,34 @@ jobs:
           print("Personal signing keystore configured; credentials kept out of repository and logs.")
           PY
           keytool -list -keystore TMessagesProj/config/release.keystore -storepass "$TELEGRAM_SIGNING_PASSWORD" -alias weplick60 > /dev/null
+
+      - name: Configure Smoothygram Firebase app
+        env:
+          SMOOTHYGRAM_GOOGLE_SERVICES_BASE64: ${{ secrets.SMOOTHYGRAM_GOOGLE_SERVICES_BASE64 }}
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, pathlib, sys
+          encoded = os.environ.get("SMOOTHYGRAM_GOOGLE_SERVICES_BASE64", "").strip()
+          if not encoded:
+              sys.exit("Missing SMOOTHYGRAM_GOOGLE_SERVICES_BASE64. Register Android app com.weplick.smoothygram in Firebase, then save base64-encoded google-services.json in GitHub Actions secrets.")
+          try:
+              data = base64.b64decode(encoded, validate=True)
+              config = json.loads(data)
+          except Exception:
+              sys.exit("Invalid base64 Firebase configuration JSON.")
+          clients = [x for x in config.get("client", [])
+                     if x.get("client_info", {}).get("android_client_info", {}).get("package_name") == "com.weplick.smoothygram"]
+          if len(clients) != 1:
+              sys.exit("Firebase config must contain exactly one client for com.weplick.smoothygram.")
+          if not config.get("project_info", {}).get("project_number"):
+              sys.exit("Missing Firebase project number.")
+          if not clients[0].get("client_info", {}).get("mobilesdk_app_id"):
+              sys.exit("Missing Firebase Android app ID.")
+          if not clients[0].get("api_key"):
+              sys.exit("Missing Firebase API key configuration.")
+          pathlib.Path("TMessagesProj_App/google-services.json").write_bytes(data)
+          print("Firebase configuration validated for Smoothygram; values omitted from logs.")
+          PY
 
       - name: Build debug APK
         run: |
