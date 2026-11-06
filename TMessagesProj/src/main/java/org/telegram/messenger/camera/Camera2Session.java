@@ -532,10 +532,14 @@ public class Camera2Session {
                 + ", recordingSize=" + previewSize);
         StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
         if (map != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            long minFrameNs = map.getOutputMinFrameDuration(SurfaceTexture.class, previewSize);
-            FileLog.d("Smoothygram Camera2 stream: camera=" + cameraId
-                    + ", minimumFrameDurationNs=" + minFrameNs
-                    + ", maxTheoreticalFps=" + (minFrameNs > 0 ? 1_000_000_000.0 / minFrameNs : -1));
+            try {
+                long minFrameNs = map.getOutputMinFrameDuration(SurfaceTexture.class, previewSize);
+                FileLog.d("Smoothygram Camera2 stream: camera=" + cameraId
+                        + ", minimumFrameDurationNs=" + minFrameNs
+                        + ", maxTheoreticalFps=" + (minFrameNs > 0 ? 1_000_000_000.0 / minFrameNs : -1));
+            } catch (IllegalArgumentException e) {
+                FileLog.d("Smoothygram Camera2 stream: no duration for preview size " + previewSize);
+            }
         }
         return choice;
     }
