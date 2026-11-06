@@ -468,6 +468,78 @@ public class Camera2Session {
         }
     }
 
+    // Smoothygram: measure the real Camera2 sensor rate without logging each frame.
+    private long fpsSampleStartNs;
+    private int fpsSampleCount;
+    private final CameraCaptureSession.CaptureCallback fpsCaptureCallback = new CameraCaptureSession.CaptureCallback() {
+        @Override
+        public void onCaptureCompleted(@NonNull CameraCaptureSession session,
+                                       @NonNull CaptureRequest request,
+                                       @NonNull TotalCaptureResult result) {
+            if (!recordingVideo) return;
+            Long sensorNs = result.get(CaptureResult.SENSOR_TIMESTAMP);
+            if (sensorNs == null) return;
+            if (fpsSampleStartNs == 0 || sensorNs <= fpsSampleStartNs) {
+                fpsSampleStartNs = sensorNs;
+                fpsSampleCount = 0;
+                return;
+            }
+            fpsSampleCount++;
+            if (fpsSampleCount >= 60) {
+                double fps = fpsSampleCount * 1_000_000_000.0 / (sensorNs - fpsSampleStartNs);
+                FileLog.d("Smoothygram Camera2 HAL fps: camera=" + cameraId
+                        + ", actualFps=" + fps
+                        + ", appliedRange=" + result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE)
+                        + ", frameDurationNs=" + result.get(CaptureResult.SENSOR_FRAME_DURATION)
+                        + ", exposureNs=" + result.get(CaptureResult.SENSOR_EXPOSURE_TIME));
+                fpsSampleStartNs = sensorNs;
+                fpsSampleCount = 0;
+            }
+        }
+    };
+
+    private Range<Integer> selectVideoFpsRange() {
+        Range<Integer>[] ranges = cameraCharacteristics == null ? null :
+                cameraCharacteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+        if (ranges == null || ranges.length == 0) {
+            FileLog.d("Smoothygram Camera2 FPS: camera=" + cameraId + ", ranges unavailable; using default");
+            return null;
+        }
+        Range<Integer> choice = null;
+        for (Range<Integer> range : ranges) {
+            if (range.getLower() == 60 && range.getUpper() == 60) {
+                choice = range;
+                break;
+            }
+        }
+        if (choice == null) {
+            for (Range<Integer> range : ranges) {
+                if (range.getUpper() >= 60 && range.getLower() <= 60 &&
+                        (choice == null || range.getLower() > choice.getLower())) {
+                    choice = range;
+                }
+            }
+        }
+        if (choice == null) {
+            for (Range<Integer> range : ranges) {
+                if (choice == null || range.getUpper() > choice.getUpper()) {
+                    choice = range;
+                }
+            }
+        }
+        FileLog.d("Smoothygram Camera2 FPS: camera=" + cameraId
+                + ", available=" + Arrays.toString(ranges) + ", selected=" + choice
+                + ", recordingSize=" + previewSize);
+        StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+        if (map != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            long minFrameNs = map.getOutputMinFrameDuration(SurfaceTexture.class, previewSize);
+            FileLog.d("Smoothygram Camera2 stream: camera=" + cameraId
+                    + ", minimumFrameDurationNs=" + minFrameNs
+                    + ", maxTheoreticalFps=" + (minFrameNs > 0 ? 1_000_000_000.0 / minFrameNs : -1));
+        }
+        return choice;
+    }
+
     private void updateCaptureRequest() {
         if (cameraDevice == null || surface == null || captureSession == null) return;
         try {
@@ -490,7 +562,10 @@ public class Camera2Session {
             captureRequestBuilder.set(CaptureRequest.FLASH_MODE, flashing ? (recordingVideo ? CaptureRequest.FLASH_MODE_TORCH : CaptureRequest.FLASH_MODE_SINGLE) : CaptureRequest.FLASH_MODE_OFF);
 
             if (recordingVideo) {
-                captureRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<Integer>(30, 60));
+                Range<Integer> videoFpsRange = selectVideoFpsRange();
+                if (videoFpsRange != null) {
+                    captureRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, videoFpsRange);
+                }
                 captureRequestBuilder.set(CaptureRequest.CONTROL_CAPTURE_INTENT, CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD);
             }
 
@@ -509,7 +584,9 @@ public class Camera2Session {
             }
 
             captureRequestBuilder.addTarget(surface);
-            captureSession.setRepeatingRequest(captureRequestBuilder.build(), null, handler);
+            fpsSampleStartNs = 0;
+            fpsSampleCount = 0;
+            captureSession.setRepeatingRequest(captureRequestBuilder.build(), recordingVideo ? fpsCaptureCallback : null, handler);
         } catch (Exception e) {
             FileLog.e("Camera2Sessions setRepeatingRequest error in updateCaptureRequest", e);
         }
