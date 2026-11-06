@@ -73,7 +73,7 @@ android {
             debuggable true
             jniDebuggable true
             signingConfig signingConfigs.debug
-            applicationIdSuffix ".beta"
+            // Custom debug client uses APP_PACKAGE directly (no .beta suffix).
             minifyEnabled false
             shrinkResources false
             multiDexEnabled true
