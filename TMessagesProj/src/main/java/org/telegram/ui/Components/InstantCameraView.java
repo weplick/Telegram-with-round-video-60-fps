@@ -2178,7 +2178,7 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
 
         private static final String VIDEO_MIME_TYPE = "video/avc";
         private static final String AUDIO_MIME_TYPE = "audio/mp4a-latm";
-        private static final int FRAME_RATE = 30;
+        private static final int FRAME_RATE = 60; // Smoothygram: target 60 FPS in the AVC encoder.
         private static final int IFRAME_INTERVAL = 1;
 
         private File videoFile;
@@ -2442,6 +2442,9 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
         }
 
         long prevTimestamp;
+        private long smoothygramFpsStartNs;
+        private long smoothygramFpsLastNs;
+        private int smoothygramFpsFrames;
         public void frameAvailable(SurfaceTexture st, Integer cameraId, long timestampInternal) {
             synchronized (sync) {
                 if (!ready) {
@@ -2463,6 +2466,23 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
             } else {
                 zeroTimeStamps = 0;
             }
+            // Count incoming unique camera frames, not just the nominal encoder FPS.
+            // Reset on timestamp discontinuities or camera switches.
+            if (smoothygramFpsStartNs == 0 || timestamp <= smoothygramFpsLastNs
+                    || timestamp - smoothygramFpsLastNs > 500_000_000L) {
+                smoothygramFpsStartNs = timestamp;
+                smoothygramFpsFrames = 0;
+            } else {
+                smoothygramFpsFrames++;
+                if (smoothygramFpsFrames >= 60) {
+                    double actualFps = smoothygramFpsFrames * 1_000_000_000.0 / (timestamp - smoothygramFpsStartNs);
+                    FileLog.d("Smoothygram InstantCamera incoming FPS: camera=" + cameraId
+                            + ", actualFps=" + actualFps + ", encoderTargetFps=" + FRAME_RATE);
+                    smoothygramFpsFrames = 0;
+                    smoothygramFpsStartNs = timestamp;
+                }
+            }
+            smoothygramFpsLastNs = timestamp;
             prevTimestamp = timestamp;
             handler.sendMessage(handler.obtainMessage(MSG_VIDEOFRAME_AVAILABLE, (int) (timestamp >> 32), (int) timestamp, cameraId));
         }
@@ -3276,6 +3296,7 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                 format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
                 format.setInteger(MediaFormat.KEY_BIT_RATE, videoBitrate);
                 format.setInteger(MediaFormat.KEY_FRAME_RATE, FRAME_RATE);
+                FileLog.d("Smoothygram InstantCamera encoder: targetFps=" + FRAME_RATE + ", size=" + videoWidth + "x" + videoHeight);
                 format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, IFRAME_INTERVAL);
 
                 videoEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
