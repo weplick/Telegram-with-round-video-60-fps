@@ -57,6 +57,40 @@ jobs:
           print("Own Telegram API credentials configured (values not printed).")
           PY
 
+      - name: Configure personal APK signing key
+        env:
+          TELEGRAM_SIGNING_KEYSTORE_BASE64: ${{ secrets.TELEGRAM_SIGNING_KEYSTORE_BASE64 }}
+          TELEGRAM_SIGNING_PASSWORD: ${{ secrets.TELEGRAM_SIGNING_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64, os, pathlib, re, sys
+          encoded = os.environ.get("TELEGRAM_SIGNING_KEYSTORE_BASE64", "").strip()
+          password = os.environ.get("TELEGRAM_SIGNING_PASSWORD", "")
+          if not encoded or len(password) < 16:
+              sys.exit("Missing signing secrets. Set TELEGRAM_SIGNING_KEYSTORE_BASE64 and TELEGRAM_SIGNING_PASSWORD.")
+          try:
+              data = base64.b64decode(encoded, validate=True)
+          except Exception:
+              sys.exit("Invalid base64 signing key secret.")
+          if not data or len(data) > 16384:
+              sys.exit("Unexpected signing key size.")
+          store_path = pathlib.Path("TMessagesProj/config/release.keystore")
+          store_path.write_bytes(data)
+          props = pathlib.Path("gradle.properties")
+          content = props.read_text()
+          for field, value in (
+              ("RELEASE_KEY_PASSWORD", password),
+              ("RELEASE_KEY_ALIAS", "weplick60"),
+              ("RELEASE_STORE_PASSWORD", password),
+          ):
+              content, count = re.subn(r"(?m)^" + field + r"=.*$", lambda _: field + "=" + value, content, count=1)
+              if count != 1:
+                  sys.exit("Could not configure signing property " + field)
+          props.write_text(content)
+          print("Personal signing keystore configured; credentials kept out of repository and logs.")
+          PY
+          keytool -list -keystore TMessagesProj/config/release.keystore -storepass "$TELEGRAM_SIGNING_PASSWORD" -alias weplick60 > /dev/null
+
       - name: Build debug APK
         run: |
           chmod +x gradlew
