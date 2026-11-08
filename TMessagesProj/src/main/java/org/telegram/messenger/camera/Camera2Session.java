@@ -382,13 +382,28 @@ public class Camera2Session {
         if (!isInitiated()) return;
         if (captureRequestBuilder == null || cameraDevice == null || sensorSize == null) return;
 
-        currentZoom = Utilities.clamp(value, maxZoom, 1f);
-        updateCaptureRequest();
+        float newZoom = Utilities.clamp(value, maxZoom, 1f);
+        if (Math.abs(newZoom - currentZoom) < 0.002f) return;
+        currentZoom = newZoom;
 
+        // Update the crop on the existing request instead of rebuilding the camera
+        // request and submitting it twice for every pinch/animation frame.
+        if (Math.abs(currentZoom - 1f) >= 0.01f) {
+            final int centerX = sensorSize.centerX();
+            final int centerY = sensorSize.centerY();
+            final int halfWidth = (int) (sensorSize.width() / (2f * currentZoom));
+            final int halfHeight = (int) (sensorSize.height() / (2f * currentZoom));
+            cropRegion.set(centerX - halfWidth, centerY - halfHeight,
+                    centerX + halfWidth, centerY + halfHeight);
+            captureRequestBuilder.set(CaptureRequest.SCALER_CROP_REGION, cropRegion);
+        } else {
+            captureRequestBuilder.set(CaptureRequest.SCALER_CROP_REGION, sensorSize);
+        }
         try {
-            captureSession.setRepeatingRequest(captureRequestBuilder.build(), null, handler);
+            captureSession.setRepeatingRequest(captureRequestBuilder.build(),
+                    recordingVideo ? fpsCaptureCallback : null, handler);
         } catch (Exception e) {
-            FileLog.e(e);
+            FileLog.e("Smoothygram Camera2 zoom request failed", e);
         }
     }
 
