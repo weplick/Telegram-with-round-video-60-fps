@@ -16,19 +16,19 @@ public final class SharedSettings {
         EnumSetting.of("audio_recorder_noise_suppression", AudioRecordingSession.NoiseSuppression.DISABLED);
 
     public static final BooleanSetting roundVideoCamera2Enabled =
-        BooleanSetting.of("round_video_camera2_enabled", BuildConfig.DEBUG_VERSION);
+        BooleanSetting.of("round_video_camera2_enabled", true);
 
     public static final EnumSetting<RoundVideoSession.OutputResolution> roundVideoOutputResolution =
         EnumSetting.of("round_video_output_resolution", RoundVideoSession.OutputResolution.P480);
 
     public static final EnumSetting<RoundVideoSession.CameraResolution> roundVideoCameraResolution =
-        EnumSetting.of("round_video_camera_resolution", RoundVideoSession.CameraResolution.HIGH);
+        EnumSetting.of("round_video_camera_resolution", RoundVideoSession.CameraResolution.MEDIUM);
 
     public static final EnumSetting<RoundVideoSession.FrameRate> roundVideoFrameRate =
-        EnumSetting.of("round_video_frame_rate", RoundVideoSession.FrameRate.FPS_30);
+        EnumSetting.of("round_video_frame_rate", RoundVideoSession.FrameRate.FPS_60);
 
     public static final IntSetting roundVideoVideoBitrate =
-        IntSetting.of("round_video_video_bitrate", 1_200_000);
+        IntSetting.of("round_video_video_bitrate", 1_000_000);
 
     public static final BooleanSetting roundVideoComposition =
         BooleanSetting.of("round_video_composition", true);
