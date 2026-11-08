@@ -2,7 +2,7 @@ name: Build Smoothygram Camera2 diagnostic APK
 
 on:
   workflow_dispatch:
-  # Build the current Beta-recorder integration once when this workflow is updated.
+  # One-off build trigger: test single-camera 60fps in the new RoundVideoSession (Build #12).
   push:
     branches: [master]
     paths:
