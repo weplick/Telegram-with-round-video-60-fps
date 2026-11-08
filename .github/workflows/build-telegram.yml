@@ -2,7 +2,7 @@ name: Build Smoothygram Camera2 diagnostic APK
 
 on:
   workflow_dispatch:
-  # One-off build trigger: test single-camera 60fps in the new RoundVideoSession (Build #12).
+  # One-off build trigger: Smoothygram v13 experimental preview and GL FPS diagnostics.
   push:
     branches: [master]
     paths:
