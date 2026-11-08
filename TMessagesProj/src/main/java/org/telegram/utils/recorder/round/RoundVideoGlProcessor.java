@@ -31,6 +31,7 @@ final class RoundVideoGlProcessor {
     private static final int GPU_TIMING_SAMPLE_INTERVAL = 30;
     private static final int OUTPUT_SIZE_CHECK_INTERVAL = 60;
     private static final long FRAME_GAP_SIZE_CHECK_NS = 50_000_000L;
+    private static final long DIAGNOSTIC_FRAME_WINDOW_NS = 3_000_000_000L;
     private static final long SWITCH_FRAME_DELAY_MS = 33L;
     private static final long SWITCH_LIVE_FALLBACK_DELAY_MS = 70L;
     private static final float SWITCH_OVERDUE_BLUR_GROWTH = 0.35f;
@@ -107,6 +108,16 @@ final class RoundVideoGlProcessor {
     private int swapTimingFrames;
     private long swapTimingTotalNs;
     private long swapTimingMaxNs;
+    // Per-window, camera-sourced GL input metrics. Synthetic switch frames are excluded.
+    private long liveInputWindowStartNs;
+    private long liveInputWindowFrames;
+    private long liveInputLastTimestampNs;
+    private long liveInputLastCallbackNs;
+    private long liveInputTimestampGapsOver33Ms;
+    private long liveInputCallbackGapsOver33Ms;
+    private long liveInputMaximumTimestampGapNs;
+    private long liveInputMaximumCallbackGapNs;
+    private long liveInputNonMonotonicTimestamps;
     private long inputFrames;
     private long primaryInputFrames;
     private long secondaryInputFrames;
@@ -332,6 +343,7 @@ final class RoundVideoGlProcessor {
             newCameraSessionReady = false;
             switchOldBlurRadiusPx = 0f;
             switchState = SWITCH_BLUR_OLD;
+            resetLiveInputMetrics();
             cameraSwitchStartNs = switchStageStartNs = SystemClock.elapsedRealtimeNanos();
             switchFromFacing = from;
             switchToFacing = to;
@@ -661,6 +673,9 @@ final class RoundVideoGlProcessor {
                         + ", elapsedMs=" + elapsedMs(glStartedNs));
             }
             if (secondary != secondaryInputActive) return;
+            if (switchState == SWITCH_NONE && recordingStarted) {
+                recordLiveInputFrame(timestamp);
+            }
             if (!recordingStarted) {
                 renderPreviewAndNotify(cameraTexture, matrix);
                 Runnable listener = firstFrameListener;
@@ -860,6 +875,7 @@ final class RoundVideoGlProcessor {
             if (switchState == SWITCH_UNBLUR_NEW && elapsed >= revealDurationNs) {
                 overlayRenderer.finishCameraSwitch(now);
                 switchState = SWITCH_NONE;
+                resetLiveInputMetrics();
                 diagnostics.log("synthetic camera switch completed: elapsedMs="
                         + (now - cameraSwitchStartNs) / 1_000_000f
                         + ", syntheticFrames=" + syntheticFrames);
@@ -993,6 +1009,55 @@ final class RoundVideoGlProcessor {
 
     private static long elapsedMs(long startedNs) {
         return (System.nanoTime() - startedNs) / 1_000_000L;
+    }
+
+    private void resetLiveInputMetrics() {
+        liveInputWindowStartNs = 0L;
+        liveInputWindowFrames = 0L;
+        liveInputLastTimestampNs = 0L;
+        liveInputLastCallbackNs = 0L;
+        liveInputTimestampGapsOver33Ms = 0L;
+        liveInputCallbackGapsOver33Ms = 0L;
+        liveInputMaximumTimestampGapNs = 0L;
+        liveInputMaximumCallbackGapNs = 0L;
+        liveInputNonMonotonicTimestamps = 0L;
+    }
+
+    private void recordLiveInputFrame(long timestampNs) {
+        long nowNs = SystemClock.elapsedRealtimeNanos();
+        if (liveInputWindowStartNs == 0L) {
+            liveInputWindowStartNs = nowNs;
+        }
+        if (liveInputLastTimestampNs != 0L) {
+            long gapNs = timestampNs - liveInputLastTimestampNs;
+            if (gapNs <= 0L) {
+                liveInputNonMonotonicTimestamps++;
+            } else {
+                if (gapNs > 33_000_000L) liveInputTimestampGapsOver33Ms++;
+                liveInputMaximumTimestampGapNs = Math.max(liveInputMaximumTimestampGapNs, gapNs);
+            }
+        }
+        if (liveInputLastCallbackNs != 0L) {
+            long gapNs = nowNs - liveInputLastCallbackNs;
+            if (gapNs > 33_000_000L) liveInputCallbackGapsOver33Ms++;
+            liveInputMaximumCallbackGapNs = Math.max(liveInputMaximumCallbackGapNs, gapNs);
+        }
+        liveInputLastTimestampNs = timestampNs;
+        liveInputLastCallbackNs = nowNs;
+        liveInputWindowFrames++;
+        long durationNs = nowNs - liveInputWindowStartNs;
+        if (durationNs >= DIAGNOSTIC_FRAME_WINDOW_NS) {
+            diagnostics.log("GL live camera input: fps="
+                    + (liveInputWindowFrames - 1L) * 1_000_000_000f / durationNs
+                    + ", frames=" + liveInputWindowFrames
+                    + ", sensorGapsOver33ms=" + liveInputTimestampGapsOver33Ms
+                    + ", callbackGapsOver33ms=" + liveInputCallbackGapsOver33Ms
+                    + ", maxSensorGapMs=" + liveInputMaximumTimestampGapNs / 1_000_000f
+                    + ", maxCallbackGapMs=" + liveInputMaximumCallbackGapNs / 1_000_000f
+                    + ", nonMonotonicTimestamps=" + liveInputNonMonotonicTimestamps
+                    + ", excludesSyntheticSwitchFrames=true");
+            resetLiveInputMetrics();
+        }
     }
 
     private void recordSwapTiming(long durationNs) {
