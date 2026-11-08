@@ -105,6 +105,7 @@ import org.telegram.ui.Components.voip.CellFlickerDrawable;
 import org.telegram.ui.Stories.recorder.DualCameraView;
 import org.telegram.ui.Stories.recorder.FlashViews;
 import org.telegram.ui.Stories.recorder.StoryEntry;
+import org.telegram.utils.settings.SharedSettings;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -2390,13 +2391,19 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
             }
 
             started = true;
-            // Smoothygram test build: output at least 480x480 for round video.
-            // The ordinary video quality preference is separate from the server's roundVideoSize.
+            // Smoothygram: use the round-video quality selector also for the legacy InstantCamera recorder.
+            // Round video is square: 1080p means 1080x1080, 720p means 720x720, etc.
             int serverRoundResolution = MessagesController.getInstance(currentAccount).roundVideoSize;
-            int resolution = Math.max(480, serverRoundResolution);
+            int resolution = SharedSettings.roundVideoOutputResolution.get().getSize();
             int bitrate = MessagesController.getInstance(currentAccount).roundVideoBitrate * 1024;
+            // Higher square resolutions need enough AVC bitrate to avoid extreme compression.
+            if (resolution >= 1080) {
+                bitrate = Math.max(bitrate, 6_000_000);
+            } else if (resolution >= 720) {
+                bitrate = Math.max(bitrate, 3_000_000);
+            }
             FileLog.d("Smoothygram round quality: serverResolution=" + serverRoundResolution
-                    + ", outputResolution=" + resolution + ", bitrate=" + bitrate);
+                    + ", selectedResolution=" + resolution + ", outputResolution=" + resolution + ", bitrate=" + bitrate);
             AndroidUtilities.runOnUIThread(() -> {
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.stopAllHeavyOperations, 512);
             });
