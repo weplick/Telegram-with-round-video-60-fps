@@ -541,32 +541,35 @@ public class Camera2Session {
                 cameraCharacteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
         if (ranges == null || ranges.length == 0) {
             if (!smoothygramFpsSettingsLogged) {
-            smoothygramFpsSettingsLogged = true;
-            FileLog.d("Smoothygram Camera2 FPS: camera=" + cameraId + ", ranges unavailable; using default");
-                return null;
+                FileLog.d("Smoothygram Camera2 FPS: camera=" + cameraId + ", ranges unavailable; using default");
+                smoothygramFpsSettingsLogged = true;
             }
-            Range<Integer> choice = null;
+            return null;
+        }
+        Range<Integer> choice = null;
+        for (Range<Integer> range : ranges) {
+            if (range.getLower() == 60 && range.getUpper() == 60) {
+                choice = range;
+                break;
+            }
+        }
+        if (choice == null) {
             for (Range<Integer> range : ranges) {
-                if (range.getLower() == 60 && range.getUpper() == 60) {
+                if (range.getUpper() >= 60 && range.getLower() <= 60 &&
+                        (choice == null || range.getLower() > choice.getLower())) {
                     choice = range;
-                    break;
                 }
             }
-            if (choice == null) {
-                for (Range<Integer> range : ranges) {
-                    if (range.getUpper() >= 60 && range.getLower() <= 60 &&
-                            (choice == null || range.getLower() > choice.getLower())) {
-                        choice = range;
-                    }
+        }
+        if (choice == null) {
+            for (Range<Integer> range : ranges) {
+                if (choice == null || range.getUpper() > choice.getUpper()) {
+                    choice = range;
                 }
             }
-            if (choice == null) {
-                for (Range<Integer> range : ranges) {
-                    if (choice == null || range.getUpper() > choice.getUpper()) {
-                        choice = range;
-                    }
-                }
-            }
+        }
+        if (!smoothygramFpsSettingsLogged) {
+            smoothygramFpsSettingsLogged = true;
             FileLog.d("Smoothygram Camera2 FPS: camera=" + cameraId
                     + ", available=" + Arrays.toString(ranges) + ", selected=" + choice
                     + ", recordingSize=" + previewSize);
@@ -581,7 +584,7 @@ public class Camera2Session {
                     FileLog.d("Smoothygram Camera2 stream: no duration for preview size " + previewSize);
                 }
             }
-            }
+        }
         return choice;
     }
 
