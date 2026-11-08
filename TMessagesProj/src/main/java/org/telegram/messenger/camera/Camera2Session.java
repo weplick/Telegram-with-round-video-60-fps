@@ -104,7 +104,7 @@ public class Camera2Session {
                 }
                 if (bestAspectRatio <= 0 || Math.abs((float) viewWidth / viewHeight - bestAspectRatio) > Math.abs((float) viewWidth / viewHeight - cameraAspectRatio)) {
                     if (confMap != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        Size size = chooseOptimalSize(confMap.getOutputSizes(SurfaceTexture.class), viewWidth, viewHeight, false);
+                        Size size = choose60FpsPreviewSize(confMap, viewWidth, viewHeight, id);
                         if (size != null) {
                             bestAspectRatio = cameraAspectRatio;
                             cameraId = id;
@@ -123,6 +123,43 @@ public class Camera2Session {
             return null;
         }
         return new Camera2Session(context, front, cameraId, bestSize);
+    }
+
+    // Prefer a camera stream capable of 60 FPS before falling back to Telegram's size choice.
+    // SurfaceTexture dimensions are NOT the encoded dimensions of the round video.
+    private static Size choose60FpsPreviewSize(StreamConfigurationMap map, int requestedWidth, int requestedHeight, String cameraId) {
+        Size[] sizes = map.getOutputSizes(SurfaceTexture.class);
+        if (sizes == null || sizes.length == 0) return null;
+        Size fallback = chooseOptimalSize(sizes, requestedWidth, requestedHeight, false);
+        Size best = null;
+        long bestScore = Long.MAX_VALUE;
+        long thresholdNs = 16_800_000L; // Allow sensor/HAL rounding around 60 fps.
+        StringBuilder supported = new StringBuilder();
+        for (Size candidate : sizes) {
+            if (candidate.getWidth() < requestedWidth || candidate.getHeight() < requestedHeight) continue;
+            long minNs;
+            try {
+                minNs = map.getOutputMinFrameDuration(SurfaceTexture.class, candidate);
+            } catch (IllegalArgumentException ignored) {
+                continue;
+            }
+            if (supported.length() < 2200) {
+                if (supported.length() > 0) supported.append("; ");
+                supported.append(candidate.getWidth()).append("x").append(candidate.getHeight())
+                        .append("=").append(minNs > 0 ? 1_000_000_000.0 / minNs : -1).append("fps");
+            }
+            if (minNs <= 0 || minNs > thresholdNs) continue;
+            long area = (long) candidate.getWidth() * candidate.getHeight();
+            long score = area + (long) Math.abs(candidate.getWidth() - candidate.getHeight()) * 600L;
+            if (score < bestScore) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+        FileLog.d("Smoothygram Camera2 sizes: camera=" + cameraId + ", target="
+                + requestedWidth + "x" + requestedHeight + ", options=" + supported
+                + ", fps60Candidate=" + best + ", fallback=" + fallback);
+        return best != null ? best : fallback;
     }
 
     private Camera2Session(Context context, boolean isFront, String cameraId, Size size) {
@@ -498,49 +535,53 @@ public class Camera2Session {
         }
     };
 
+    private boolean smoothygramFpsSettingsLogged;
     private Range<Integer> selectVideoFpsRange() {
         Range<Integer>[] ranges = cameraCharacteristics == null ? null :
                 cameraCharacteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
         if (ranges == null || ranges.length == 0) {
+            if (!smoothygramFpsSettingsLogged) {
+            smoothygramFpsSettingsLogged = true;
             FileLog.d("Smoothygram Camera2 FPS: camera=" + cameraId + ", ranges unavailable; using default");
-            return null;
-        }
-        Range<Integer> choice = null;
-        for (Range<Integer> range : ranges) {
-            if (range.getLower() == 60 && range.getUpper() == 60) {
-                choice = range;
-                break;
+                return null;
             }
-        }
-        if (choice == null) {
+            Range<Integer> choice = null;
             for (Range<Integer> range : ranges) {
-                if (range.getUpper() >= 60 && range.getLower() <= 60 &&
-                        (choice == null || range.getLower() > choice.getLower())) {
+                if (range.getLower() == 60 && range.getUpper() == 60) {
                     choice = range;
+                    break;
                 }
             }
-        }
-        if (choice == null) {
-            for (Range<Integer> range : ranges) {
-                if (choice == null || range.getUpper() > choice.getUpper()) {
-                    choice = range;
+            if (choice == null) {
+                for (Range<Integer> range : ranges) {
+                    if (range.getUpper() >= 60 && range.getLower() <= 60 &&
+                            (choice == null || range.getLower() > choice.getLower())) {
+                        choice = range;
+                    }
                 }
             }
-        }
-        FileLog.d("Smoothygram Camera2 FPS: camera=" + cameraId
-                + ", available=" + Arrays.toString(ranges) + ", selected=" + choice
-                + ", recordingSize=" + previewSize);
-        StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-        if (map != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            try {
-                long minFrameNs = map.getOutputMinFrameDuration(SurfaceTexture.class, previewSize);
-                FileLog.d("Smoothygram Camera2 stream: camera=" + cameraId
-                        + ", minimumFrameDurationNs=" + minFrameNs
-                        + ", maxTheoreticalFps=" + (minFrameNs > 0 ? 1_000_000_000.0 / minFrameNs : -1));
-            } catch (IllegalArgumentException e) {
-                FileLog.d("Smoothygram Camera2 stream: no duration for preview size " + previewSize);
+            if (choice == null) {
+                for (Range<Integer> range : ranges) {
+                    if (choice == null || range.getUpper() > choice.getUpper()) {
+                        choice = range;
+                    }
+                }
             }
-        }
+            FileLog.d("Smoothygram Camera2 FPS: camera=" + cameraId
+                    + ", available=" + Arrays.toString(ranges) + ", selected=" + choice
+                    + ", recordingSize=" + previewSize);
+            StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            if (map != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                try {
+                    long minFrameNs = map.getOutputMinFrameDuration(SurfaceTexture.class, previewSize);
+                    FileLog.d("Smoothygram Camera2 stream: camera=" + cameraId
+                            + ", minimumFrameDurationNs=" + minFrameNs
+                            + ", maxTheoreticalFps=" + (minFrameNs > 0 ? 1_000_000_000.0 / minFrameNs : -1));
+                } catch (IllegalArgumentException e) {
+                    FileLog.d("Smoothygram Camera2 stream: no duration for preview size " + previewSize);
+                }
+            }
+            }
         return choice;
     }
 
