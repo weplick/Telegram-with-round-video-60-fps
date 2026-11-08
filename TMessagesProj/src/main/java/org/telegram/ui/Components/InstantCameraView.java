@@ -185,6 +185,9 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
     private BackupImageView textureOverlayView;
     private final boolean useCamera2 = SharedConfig.isUsingCamera2(currentAccount);
     private CameraSession cameraSession;
+    // Smoothygram experimental build: isolate the Camera2 FPS test from dual-camera HAL resource contention.
+    // Re-enable the original preopened dual-camera behavior by setting this to false.
+    private static final boolean SMOOTHYGRAM_SINGLE_CAMERA_FPS_TEST = true;
     private boolean bothCameras;
     private Camera2Session[] camera2Sessions = new Camera2Session[2];
     private Camera2Session camera2SessionCurrent;
@@ -781,7 +784,12 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
         }
 
         if (useCamera2) {
-            bothCameras = DualCameraView.roundDualAvailableStatic(getContext());
+            boolean dualSupported = DualCameraView.roundDualAvailableStatic(getContext());
+            bothCameras = dualSupported && !SMOOTHYGRAM_SINGLE_CAMERA_FPS_TEST;
+            FileLog.d("Smoothygram Camera2 test: singleCamera=" + SMOOTHYGRAM_SINGLE_CAMERA_FPS_TEST
+                    + ", dualSupported=" + dualSupported
+                    + ", dualPreopened=" + bothCameras
+                    + ", facing=" + (isFrontface ? "FRONT" : "BACK"));
             if (bothCameras) {
                 for (int a = 0; a < 2; ++a) {
                     if (camera2Sessions[a] == null) {
