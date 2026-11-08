@@ -2100,6 +2100,17 @@ final class RoundVideoCameraController {
     }
 
     private void prepareWarmSwitchSupport() {
+        // Smoothygram: Samsung Camera HAL advertises concurrent cameras at 60 fps,
+        // but actually applies [30,30] to both streams when they run together.
+        // Use one active camera for 60-fps rounds. Switching remains sequential.
+        // Keep the warm-switch implementation intact for the 30-fps mode.
+        if (requestedFrameRate == RoundVideoSession.FrameRate.FPS_60) {
+            warmSwitchSupported = false;
+            warmSwitchDisabled = true;
+            dualActiveMode = false;
+            diagnostics.log("Smoothygram single-camera 60fps: disabled dual-active and warm standby");
+            return;
+        }
         if (warmSwitchDisabled) {
             return;
         }
