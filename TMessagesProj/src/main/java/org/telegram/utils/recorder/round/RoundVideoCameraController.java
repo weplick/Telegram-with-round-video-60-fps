@@ -1831,7 +1831,7 @@ final class RoundVideoCameraController {
         diagnostics.log("preview frame delivery: callbackFps="
                 + previewFrames * 1_000_000_000f / elapsedNs
                 + ", timestampFps=" + timestampFps
-                + ", excludesCameraSwitchPause=true
+                + ", excludesCameraSwitchPause=true"
                 + ", callbackIntervalMs={avg="
                 + averageMs(previewIntervalTotalNs, previewIntervalCount)
                 + ", min=" + nanosToMs(previewIntervalMinimumNs)
