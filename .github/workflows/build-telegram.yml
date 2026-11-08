@@ -2,7 +2,7 @@ name: Build Smoothygram Camera2 diagnostic APK
 
 on:
   workflow_dispatch:
-  # One-off build trigger: Smoothygram v13 experimental preview and GL FPS diagnostics.
+  # One-off build trigger: rebuild v13 experimental diagnostics after Java syntax fix.
   push:
     branches: [master]
     paths:
