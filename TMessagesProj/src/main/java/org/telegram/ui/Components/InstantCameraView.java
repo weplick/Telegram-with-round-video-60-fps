@@ -2382,8 +2382,13 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
             }
 
             started = true;
-            int resolution = MessagesController.getInstance(currentAccount).roundVideoSize;
+            // Smoothygram test build: output at least 480x480 for round video.
+            // The ordinary video quality preference is separate from the server's roundVideoSize.
+            int serverRoundResolution = MessagesController.getInstance(currentAccount).roundVideoSize;
+            int resolution = Math.max(480, serverRoundResolution);
             int bitrate = MessagesController.getInstance(currentAccount).roundVideoBitrate * 1024;
+            FileLog.d("Smoothygram round quality: serverResolution=" + serverRoundResolution
+                    + ", outputResolution=" + resolution + ", bitrate=" + bitrate);
             AndroidUtilities.runOnUIThread(() -> {
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.stopAllHeavyOperations, 512);
             });
