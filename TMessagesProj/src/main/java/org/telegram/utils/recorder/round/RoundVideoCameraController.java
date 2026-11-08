@@ -124,7 +124,7 @@ final class RoundVideoCameraController {
     private static final int MAXIMUM_SOURCE_LONG_SIDE = 1920;
     private static final int MAXIMUM_CROP_OVERSIZE_PERCENT = 15;
     private static final float MAXIMUM_UI_ZOOM_RATIO = 4f;
-    private static final long FRAME_METRICS_PERIOD_NS = 5_000_000_000L;
+    private static final long FRAME_METRICS_PERIOD_NS = 3_000_000_000L;
     private static final long FRAME_GAP_WARNING_NS = 50_000_000L;
     private static final long FRAME_GAP_SEVERE_NS = 100_000_000L;
     private static final int TORCH_VERIFICATION_RETRY_FRAME = 3;
@@ -218,6 +218,7 @@ final class RoundVideoCameraController {
     private long cameraOpenRequestedNs;
     private long captureSessionRequestedNs;
     private long cameraSwitchStartedNs;
+    private volatile boolean previewSwitchMetricsSuspended;
     private long previewFpsStartedNs;
     private long previewFrames;
     private long previewLastCallbackNs;
@@ -300,6 +301,7 @@ final class RoundVideoCameraController {
         commonStartRecorder = null;
         previewTransformEnabled = true;
         segmentStartedNs = SystemClock.elapsedRealtimeNanos();
+        previewSwitchMetricsSuspended = false;
         resetPreviewFrameMetrics();
         resetCaptureFpsMeasurement();
         diagnostics.log("camera segment start: facing=" + facing
@@ -437,6 +439,13 @@ final class RoundVideoCameraController {
 
                 @Override
                 public void onSurfaceTextureUpdated(@NonNull SurfaceTexture surfaceTexture) {
+                    // Exclude the expected camera close/open pause from steady-state preview FPS.
+                    if (previewSwitchMetricsSuspended) {
+                        if (!awaitingSwitchPreviewFrame) return;
+                        previewSwitchMetricsSuspended = false;
+                        resetPreviewFrameMetrics();
+                        diagnostics.log("preview metrics resumed after first switched-camera frame");
+                    }
                     if (awaitingSwitchPreviewFrame) {
                         awaitingSwitchPreviewFrame = false;
                         diagnostics.log("camera switch first preview frame: path="
@@ -639,6 +648,7 @@ final class RoundVideoCameraController {
     private void switchCameraIfNeeded(@NonNull RoundVideoSession.CameraFacing facing) {
         if (!active || switchingCamera || facing == activeFacing) return;
         switchingCamera = true;
+        previewSwitchMetricsSuspended = true;
         notifySwitchCompletion = true;
         torchEnabled = false;
         torchVerificationPending = false;
@@ -1821,6 +1831,7 @@ final class RoundVideoCameraController {
         diagnostics.log("preview frame delivery: callbackFps="
                 + previewFrames * 1_000_000_000f / elapsedNs
                 + ", timestampFps=" + timestampFps
+                + ", excludesCameraSwitchPause=true
                 + ", callbackIntervalMs={avg="
                 + averageMs(previewIntervalTotalNs, previewIntervalCount)
                 + ", min=" + nanosToMs(previewIntervalMinimumNs)
