@@ -212,6 +212,12 @@ final class RoundVideoCameraController {
     private boolean warmSwitchRecoveryPending;
     private long warmCameraOpenRequestedNs;
     private long cameraCloseRequestedNs;
+    // Experimental: overlap device open with the previous device close, never two streams.
+    private CameraDevice speculativeClosingCamera;
+    private CameraDevice speculativeFailedCamera;
+    private boolean speculativeOpeningAttempt;
+    private boolean speculativeOpenedWaitingForClose;
+    private boolean speculativeRetryRequired;
     private long switchSelectionStartedNs;
     private boolean lastSwitchUsedWarmDevice;
     private long segmentStartedNs;
@@ -826,7 +832,16 @@ final class RoundVideoCameraController {
             CameraDevice device = cameraDevice;
             cameraDevice = null;
             cameraCloseRequestedNs = SystemClock.elapsedRealtimeNanos();
+            speculativeClosingCamera = device;
+            speculativeFailedCamera = null;
+            speculativeOpeningAttempt = true;
+            speculativeOpenedWaitingForClose = false;
+            speculativeRetryRequired = false;
             device.close();
+            switchingCamera = false;
+            diagnostics.log("camera switch experimental: open next device while previous closes"
+                    + ", without starting a second capture stream");
+            openCameraIfReady();
         } else if (!opening) {
             switchingCamera = false;
             openCameraIfReady();
@@ -846,6 +861,16 @@ final class RoundVideoCameraController {
                 return;
             }
             cameraDevice = device;
+            if (speculativeOpeningAttempt) {
+                speculativeOpeningAttempt = false;
+                if (speculativeClosingCamera != null) {
+                    speculativeOpenedWaitingForClose = true;
+                    diagnostics.log("camera switch experimental: next device opened, waiting for old close"
+                            + ", elapsedMs=" + elapsedMs(cameraSwitchStartedNs));
+                    return;
+                }
+                diagnostics.log("camera switch experimental: next device opened after old close");
+            }
             if (dualActiveMode) {
                 if (warmCameraOpening || warmCameraDevice == null) {
                     diagnostics.log("active camera opened; waiting for dual peer before sessions");
@@ -859,6 +884,7 @@ final class RoundVideoCameraController {
 
         @Override
         public void onDisconnected(@NonNull CameraDevice device) {
+            if (handleSpeculativeOpenFailure(device, "disconnected")) return;
             opening = false;
             diagnostics.log("camera disconnected: id=" + device.getId());
             if (isWarmSwitchRecoveryDevice(device)) {
@@ -894,6 +920,7 @@ final class RoundVideoCameraController {
 
         @Override
         public void onError(@NonNull CameraDevice device, int error) {
+            if (handleSpeculativeOpenFailure(device, cameraErrorName(error))) return;
             opening = false;
             if (isWarmSwitchRecoveryDevice(device)) {
                 diagnostics.log("camera error while warm-switch recovery is closing it: id="
@@ -929,6 +956,24 @@ final class RoundVideoCameraController {
 
         @Override
         public void onClosed(@NonNull CameraDevice device) {
+            if (device == speculativeClosingCamera) {
+                speculativeClosingCamera = null;
+                diagnostics.log("camera switch experimental: previous device closed"
+                        + ", elapsedMs=" + elapsedMs(cameraCloseRequestedNs));
+                if (speculativeOpenedWaitingForClose && cameraDevice != null) {
+                    speculativeOpenedWaitingForClose = false;
+                    diagnostics.log("camera switch experimental: creating session after old close");
+                    createCaptureSession();
+                } else {
+                    maybeRetrySpeculativeCameraOpen();
+                }
+                return;
+            }
+            if (device == speculativeFailedCamera) {
+                speculativeFailedCamera = null;
+                maybeRetrySpeculativeCameraOpen();
+                return;
+            }
             if (handleWarmSwitchRecoveryClosed(device)) return;
             if (handleStandbyCameraClosed(device)) return;
             if (device == warmCameraDevice) {
@@ -948,6 +993,28 @@ final class RoundVideoCameraController {
             }
         }
     };
+
+    private boolean handleSpeculativeOpenFailure(@NonNull CameraDevice device,
+                                                 @NonNull String reason) {
+        if (!speculativeOpeningAttempt || cameraDevice == device) return false;
+        speculativeOpeningAttempt = false;
+        speculativeRetryRequired = true;
+        speculativeFailedCamera = device;
+        opening = false;
+        diagnostics.log("camera switch experimental: early open rejected, retry sequentially"
+                + ", reason=" + reason);
+        device.close();
+        maybeRetrySpeculativeCameraOpen();
+        return true;
+    }
+
+    private void maybeRetrySpeculativeCameraOpen() {
+        if (!speculativeRetryRequired || speculativeClosingCamera != null
+                || speculativeFailedCamera != null || opening || !active || stopping) return;
+        speculativeRetryRequired = false;
+        diagnostics.log("camera switch experimental: safe sequential fallback after close");
+        openCameraIfReady();
+    }
 
     private final CameraDevice.StateCallback warmDeviceCallback =
             new CameraDevice.StateCallback() {
@@ -2607,6 +2674,11 @@ final class RoundVideoCameraController {
         cancelCommonStartWait();
         opening = false;
         switchingCamera = false;
+        speculativeClosingCamera = null;
+        speculativeFailedCamera = null;
+        speculativeOpeningAttempt = false;
+        speculativeOpenedWaitingForClose = false;
+        speculativeRetryRequired = false;
         reopenAfterCameraClose = false;
         warmSwitchRecoveryPending = false;
         retryCaptureSessionAfterStandbyClose = false;
