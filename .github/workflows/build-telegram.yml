@@ -2,9 +2,9 @@ name: Build Smoothygram Camera2 diagnostic APK
 
 on:
   workflow_dispatch:
-  # One-off build trigger: experimental camera flip timing and shorter reveal (Build #15).
+  # One-off build trigger: Build #16 speculative camera-open experiment on isolated branch.
   push:
-    branches: [master]
+    branches: [master, 'experiment/fast-camera-switch-v16']
     paths:
       - '.github/workflows/build-telegram.yml'
 
