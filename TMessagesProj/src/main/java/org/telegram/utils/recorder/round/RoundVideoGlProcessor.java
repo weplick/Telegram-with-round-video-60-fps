@@ -35,8 +35,9 @@ final class RoundVideoGlProcessor {
     private static final long SWITCH_FRAME_DELAY_MS = 33L;
     private static final long SWITCH_LIVE_FALLBACK_DELAY_MS = 70L;
     private static final float SWITCH_OVERDUE_BLUR_GROWTH = 0.35f;
-    private static final int SWITCH_MIN_REVEAL_MS = 210;
-    private static final int SWITCH_MAX_REVEAL_MS = 300;
+    // Experimental faster reveal after first live frame; camera setup remains unchanged.
+    private static final int SWITCH_MIN_REVEAL_MS = 140;
+    private static final int SWITCH_MAX_REVEAL_MS = 210;
 
     private static final int SWITCH_NONE = 0;
     private static final int SWITCH_BLUR_OLD = 1;
