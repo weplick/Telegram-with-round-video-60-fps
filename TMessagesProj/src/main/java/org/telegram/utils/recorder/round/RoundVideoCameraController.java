@@ -218,6 +218,10 @@ final class RoundVideoCameraController {
     private long cameraOpenRequestedNs;
     private long captureSessionRequestedNs;
     private long cameraSwitchStartedNs;
+    private boolean switchCaptureTimingPending;
+    private long switchSessionConfiguredNs;
+    private long switchFirstCaptureStartedNs;
+    private long switchFirstCaptureCompletedNs;
     private volatile boolean previewSwitchMetricsSuspended;
     private long previewFpsStartedNs;
     private long previewFrames;
@@ -451,7 +455,13 @@ final class RoundVideoCameraController {
                         diagnostics.log("camera switch first preview frame: path="
                                 + (dualActiveMode ? "DUAL_ACTIVE"
                                 : lastSwitchUsedWarmDevice ? "WARM_DEVICE" : "SEQUENTIAL")
-                                + ", totalElapsedMs=" + elapsedMs(cameraSwitchStartedNs));
+                                + ", totalElapsedMs=" + elapsedMs(cameraSwitchStartedNs)
+                                + ", sinceSessionConfiguredMs="
+                                + elapsedMs(switchSessionConfiguredNs)
+                                + ", sinceFirstCaptureStartedMs="
+                                + elapsedMs(switchFirstCaptureStartedNs)
+                                + ", sinceFirstCaptureCompletedMs="
+                                + elapsedMs(switchFirstCaptureCompletedNs));
                         callback.onCameraSwitchFirstFrame();
                     }
                     long now = SystemClock.elapsedRealtimeNanos();
@@ -648,6 +658,10 @@ final class RoundVideoCameraController {
     private void switchCameraIfNeeded(@NonNull RoundVideoSession.CameraFacing facing) {
         if (!active || switchingCamera || facing == activeFacing) return;
         switchingCamera = true;
+        switchCaptureTimingPending = true;
+        switchSessionConfiguredNs = 0L;
+        switchFirstCaptureStartedNs = 0L;
+        switchFirstCaptureCompletedNs = 0L;
         previewSwitchMetricsSuspended = true;
         notifySwitchCompletion = true;
         torchEnabled = false;
@@ -1426,6 +1440,11 @@ final class RoundVideoCameraController {
                         if (!pendingDualSwitch) notifySwitchCompletion = false;
                         if (wasSwitch) switchingCamera = false;
                         awaitingSwitchPreviewFrame = wasSwitch;
+                        if (wasSwitch) {
+                            switchSessionConfiguredNs = SystemClock.elapsedRealtimeNanos();
+                            diagnostics.log("switch timing: session configured, fromSwitchMs="
+                                    + elapsedMs(cameraSwitchStartedNs));
+                        }
                         diagnostics.log("capture session configured: facing=" + activeFacing
                                 + ", fpsRange=" + activeFpsRange
                                 + ", elapsedMs=" + elapsedMs(captureSessionRequestedNs)
@@ -1706,12 +1725,38 @@ final class RoundVideoCameraController {
     private final CameraCaptureSession.CaptureCallback captureCallback =
             new CameraCaptureSession.CaptureCallback() {
                 @Override
+                public void onCaptureStarted(
+                        @NonNull CameraCaptureSession session,
+                        @NonNull CaptureRequest request,
+                        long timestamp,
+                        long frameNumber
+                ) {
+                    if (session != captureSession || !switchCaptureTimingPending
+                            || switchSessionConfiguredNs == 0L
+                            || switchFirstCaptureStartedNs != 0L) return;
+                    switchFirstCaptureStartedNs = SystemClock.elapsedRealtimeNanos();
+                    diagnostics.log("switch timing: first capture started, fromSwitchMs="
+                            + elapsedMs(cameraSwitchStartedNs)
+                            + ", fromSessionConfiguredMs=" + elapsedMs(switchSessionConfiguredNs)
+                            + ", sensorTimestampNs=" + timestamp);
+                }
+
+                @Override
                 public void onCaptureCompleted(
                         @NonNull CameraCaptureSession session,
                         @NonNull CaptureRequest request,
                         @NonNull TotalCaptureResult result
                 ) {
                     if (session != captureSession) return;
+                    if (switchCaptureTimingPending && switchSessionConfiguredNs != 0L) {
+                        switchFirstCaptureCompletedNs = SystemClock.elapsedRealtimeNanos();
+                        switchCaptureTimingPending = false;
+                        diagnostics.log("switch timing: first capture completed, fromSwitchMs="
+                                + elapsedMs(cameraSwitchStartedNs)
+                                + ", fromSessionConfiguredMs=" + elapsedMs(switchSessionConfiguredNs)
+                                + ", fromFirstCaptureStartedMs="
+                                + elapsedMs(switchFirstCaptureStartedNs));
+                    }
                     verifyTorchResult(request, result);
                     Long timestampNs = result.get(CaptureResult.SENSOR_TIMESTAMP);
                     if (timestampNs == null || timestampNs <= captureFpsLastTimestampNs) return;
