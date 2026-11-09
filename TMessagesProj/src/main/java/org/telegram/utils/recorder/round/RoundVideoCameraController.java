@@ -578,7 +578,15 @@ final class RoundVideoCameraController {
             cameraManager.openCamera(cameraId, deviceCallback, cameraHandler);
         } catch (Exception e) {
             opening = false;
-            reportError(e);
+            if (speculativeOpeningAttempt && e instanceof CameraAccessException) {
+                speculativeOpeningAttempt = false;
+                speculativeRetryRequired = true;
+                diagnostics.log("camera switch experimental: early open request rejected"
+                        + ", retry after old close, reason=" + e);
+                maybeRetrySpeculativeCameraOpen();
+            } else {
+                reportError(e);
+            }
         }
     }
 
